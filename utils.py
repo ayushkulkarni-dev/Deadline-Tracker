@@ -2,10 +2,11 @@ from datetime import date, datetime, timedelta
 
 
 def days_left(date_str):
-    """'2026-10-10' -> number of days from today (negative = overdue)."""
-    due = datetime.strptime(date_str, "%Y-%m-%d").date()
+    try:
+        due = datetime.strptime(date_str, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
     return (due - date.today()).days
-
 
 def categorize(days):
     if days < 0:
@@ -34,9 +35,12 @@ def reminder_date(date_str, days_before):
     return due - timedelta(days=days_before)
 
 def reminder_needed(date_str, days_before, today=None):
-    today = today or date.today()
-    due = datetime.strptime(date_str, "%Y-%m-%d").date()
-    return reminder_date(date_str, days_before) <= today <= due
+    try:
+        today = today or date.today()
+        due = datetime.strptime(date_str, "%Y-%m-%d").date()
+        return reminder_date(date_str, days_before) <= today <= due
+    except (ValueError, TypeError):
+        return False
 
 import re
 
