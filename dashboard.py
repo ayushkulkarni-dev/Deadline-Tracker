@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-
 from database import get_deadlines
 from utils import days_left, categorize, days_label
 
@@ -28,6 +27,14 @@ def render_dashboard():
 
     df[["subject", "time", "description"]] = df[["subject", "time", "description"]].fillna("")
     df["days_left"] = df["date"].apply(days_left)
+
+    bad = int(df["days_left"].isna().sum())
+    if bad:
+        st.warning(f"{bad} deadline(s) have an invalid date and are hidden. Fix them in the review table.")
+        df = df[df["days_left"].notna()].copy()
+        if df.empty:
+            return
+    df["days_left"] = df["days_left"].astype(int)
     df["category"] = df["days_left"].apply(categorize)
 
     # ---------- Subject filter ----------
