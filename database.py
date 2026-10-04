@@ -11,7 +11,27 @@ def get_connection():
     conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
-
+def sync_deadlines(rows, delete_ids):
+    """One transaction: everything is saved, or nothing is.
+    rows: list of (id_or_None, title, subject, date, time, description)."""
+    with closing(get_connection()) as conn, conn:
+        for rid, title, subject, date_, time_, description in rows:
+            if rid is None:
+                conn.execute(
+                    "INSERT INTO deadlines (title, subject, date, time, description) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (title, subject, date_, time_, description),
+                )
+            else:
+                conn.execute(
+                    "UPDATE deadlines SET title=?, subject=?, date=?, time=?, description=? WHERE id=?",
+                    (title, subject, date_, time_, description, rid),
+                )
+        for did in delete_ids:
+            conn.execute("DELETE FROM reminders_sent WHERE deadline_id=?", (did,))
+            conn.execute("DELETE FROM emails_sent WHERE deadline_id=?", (did,))
+            conn.execute("DELETE FROM deadlines WHERE id=?", (did,))
+            
 def init_db():
     with closing(get_connection()) as conn, conn:
         conn.execute("""
