@@ -1,10 +1,12 @@
 import re
 import json
+import sqlite3
 import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
+
 from config import missing_config
-from ai_helper import extract_deadlines, parse_deadlines
+from ai_helper import extract_deadlines, parse_deadlines, GeminiError
 from database import (
     init_db, add_deadline, get_deadlines, update_deadline, delete_deadline,
     save_setting, get_setting,
@@ -15,10 +17,15 @@ from reminders import render_reminders
 from email_reminders import send_pending_emails
 from notifier import send_deadline_email
 from utils import days_left, is_valid_email
+from validators import validate_image
 
 st.set_page_config(page_title="AI Deadline Tracker", page_icon="📅", layout="wide")
 
-init_db()
+try:
+    init_db()
+except sqlite3.Error as e:
+    st.error(f"Database error ({type(e).__name__}). Check that the data/ folder exists and is writable.")
+    st.stop()
 
 DATA_COLUMNS = ["id", "title", "subject", "date", "time", "description", "source", "note"]
 TEXT_COLUMNS = ["title", "subject", "time", "description", "source", "note"]
@@ -117,16 +124,28 @@ if uploaded_files:
 
         for i, file in enumerate(files):
             progress.progress(i / len(files), text=f"Reading {file.name} ({i + 1}/{len(files)})")
-            text = extract_deadlines(file.getvalue(), file.type)
-            raw[file.name] = text
+
+            ok, mime, problem = validate_image(file)
+            if not ok:
+                summary.append({"image": file.name, "deadlines found": 0, "status": f"Skipped: {problem}"})
+                continue
+
             try:
+                text = extract_deadlines(file.getvalue(), mime)
+                raw[file.name] = text
                 items = parse_deadlines(text)
                 for item in items:
                     item["source"] = file.name
                 all_items += items
                 summary.append({"image": file.name, "deadlines found": len(items), "status": "OK"})
-            except ValueError as e:
+            except GeminiError as e:
                 summary.append({"image": file.name, "deadlines found": 0, "status": f"Failed: {e}"})
+                if e.fatal:
+                    st.error(f"Stopped: {e}")
+                    break
+            except ValueError:
+                summary.append({"image": file.name, "deadlines found": 0,
+                                "status": "Failed: Gemini's answer wasn't valid JSON. Try again or use a clearer image."})
 
         progress.empty()
         st.session_state["raw_results"] = raw
@@ -152,7 +171,7 @@ if uploaded_files:
             st.warning("No deadlines could be extracted. Check the summary below.")
 
 if "extract_summary" in st.session_state:
-    with st.expander("Extraction summary (per image)"):
+    with st.expander("Extraction summary (per image)", expanded=True):
         st.dataframe(pd.DataFrame(st.session_state["extract_summary"]), use_container_width=True)
 
 if "raw_results" in st.session_state:
@@ -281,7 +300,7 @@ with st.sidebar:
     st.header("🔔 Reminder Settings")
     missing = missing_config()
     if missing:
-        st.warning("Missing in .env: " + ", ".join(missing))
+        st.warning("Missing config (.env locally, Secrets on Streamlit Cloud): " + ", ".join(missing))
     choice = st.multiselect(
         "Remind me before",
         [1, 2, 7],
